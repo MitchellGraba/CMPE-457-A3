@@ -15,7 +15,6 @@
 import sys, os, math, time, struct, netpbm
 import numpy as np
 
-
 # Text at the beginning of the compressed file, to identify the codec
 # and codec version.
 
@@ -25,8 +24,7 @@ headerText = 'my compressed image - v1.0'
 # Compress an image
 
 
-def compress( inputFile, outputFile ):
-
+def compress(inputFile, outputFile):
     # Read the input file into a numpy array of 8-bit values
     #
     # The img.shape is a 3-type with rows,columns,channels, where
@@ -34,8 +32,8 @@ def compress( inputFile, outputFile ):
     # img.dtype is 'uint8', meaning that each component is an 8-bit
     # unsigned integer.
 
-    img = netpbm.imread( inputFile ).astype('uint8')
-    
+    img = netpbm.imread(inputFile).astype('uint8')
+
     # Compress the image
     #
     # REPLACE THIS WITH YOUR OWN CODE TO FILL THE 'outputBytes' ARRAY.
@@ -63,13 +61,65 @@ def compress( inputFile, outputFile ):
     # LOSE MARKS.
 
     startTime = time.time()
- 
+
+    val_list = map(str, range(-255, 256))
+    count = len(range(-255, 256))
+    d = dict(zip(val_list, range(512)))
+
+    s = ""
+
     outputBytes = bytearray()
 
-    for y in range(img.shape[0]):
-        for x in range(img.shape[1]):
-            for c in range(img.shape[2]):
-                outputBytes.append( img[y,x,c] )
+    diff_arr = []
+
+    # single channel image
+    if len(img.shape) == 2:
+        for y in range(img.shape[0]):
+            for x in range(img.shape[1]):
+                # predictive encoding
+                if y == 0:
+                    val = img[y, x]
+                else:
+                    val = img[y, x] - img[y - 1, x]
+                val = str(val)
+                diff_arr.append(val)
+
+    # multi-channel image
+    else:
+        for y in range(img.shape[0]):
+            for x in range(img.shape[1]):
+                for c in range(img.shape[2]):
+                    # predictive encoding
+                    if y == 0:
+                        val = img[y, x, c]
+                    else:
+                        val = img[y, x, c] - img[y - 1, x, c]
+                    val = str(val)
+                    diff_arr.append(val)
+
+    # first pixel exists in dictionary
+    s += diff_arr[0]
+    for i in range(1, len(diff_arr)):
+        # LZW compression
+        # LZW_dict keys - subsequence, string
+        # LZW_dict values - index, int
+        tmp_s = s + "," + diff_arr[i]
+        if tmp_s in d:
+            s = tmp_s
+        else:
+            # convert integer to bytes
+            val_b = struct.pack(">H", d[s])
+            # append bytes to output array
+            outputBytes += val_b
+            # append to dictionary if not full
+            if count <= 0xFFFE:
+                d[tmp_s] = count
+                count += 1
+            s = diff_arr[i]
+    # output last byte
+    val_b = struct.pack(">H", d[s])
+    # append bytes to output array
+    outputBytes += val_b
 
     endTime = time.time()
 
@@ -79,35 +129,33 @@ def compress( inputFile, outputFile ):
     # the rows, columns, channels so that the image shape can be
     # reconstructed.
 
-    outputFile.write( ('%s\n' % headerText).encode() )
-    outputFile.write( ('%d %d %d\n' % (img.shape[0], img.shape[1], img.shape[2])).encode() )
-    outputFile.write( outputBytes )
+    outputFile.write(('%s\n' % headerText).encode())
+    outputFile.write(('%d %d %d\n' % (img.shape[0], img.shape[1], img.shape[2])).encode())
+    outputFile.write(outputBytes)
 
     # Print information about the compression
-    
-    inSize  = img.shape[0] * img.shape[1] * img.shape[2]
+
+    inSize = img.shape[0] * img.shape[1] * img.shape[2]
     outSize = len(outputBytes)
 
-    sys.stderr.write( 'Input size:         %d bytes\n' % inSize )
-    sys.stderr.write( 'Output size:        %d bytes\n' % outSize )
-    sys.stderr.write( 'Compression factor: %.2f\n' % (inSize/float(outSize)) )
-    sys.stderr.write( 'Compression time:   %.2f seconds\n' % (endTime - startTime) )
-    
+    sys.stderr.write('Input size:         %d bytes\n' % inSize)
+    sys.stderr.write('Output size:        %d bytes\n' % outSize)
+    sys.stderr.write('Compression factor: %.2f\n' % (inSize / float(outSize)))
+    sys.stderr.write('Compression time:   %.2f seconds\n' % (endTime - startTime))
 
 
 # Uncompress an image
 
-def uncompress( inputFile, outputFile ):
-
+def uncompress(inputFile, outputFile):
     # Check that it's a known file
 
     if inputFile.readline().decode() != headerText + '\n':
-        sys.stderr.write( "Input is not in the '%s' format.\n" % headerText )
+        sys.stderr.write("Input is not in the '%s' format.\n" % headerText)
         sys.exit(1)
-        
+
     # Read the rows, columns, and channels.    
 
-    rows, columns, numChannels = [ int(x) for x in inputFile.readline().decode().split() ]
+    rows, columns, numChannels = [int(x) for x in inputFile.readline().decode().split()]
 
     # Read the raw bytes.
 
@@ -124,25 +172,24 @@ def uncompress( inputFile, outputFile ):
 
     startTime = time.time()
 
-    img = np.empty( [rows,columns,numChannels], dtype=np.uint8 )
+    img = np.empty([rows, columns, numChannels], dtype=np.uint8)
 
     i = 0
     for y in range(rows):
         for x in range(columns):
             for c in range(numChannels):
-                img[y,x,c] = inputBytes[i]
+                img[y, x, c] = inputBytes[i]
                 i += 1
 
     endTime = time.time()
-    sys.stderr.write( 'Uncompression time %.2f seconds\n' % (endTime - startTime) )
+    sys.stderr.write('Uncompression time %.2f seconds\n' % (endTime - startTime))
 
     # Output the image
 
-    netpbm.imsave( outputFile, img )
+    netpbm.imsave(outputFile, img)
 
 
-    
-# The command line is 
+# The command line is
 #
 #     main.py {flag} {input image filename} {output image filename}
 #
@@ -151,18 +198,18 @@ def uncompress( inputFile, outputFile ):
 
 
 if len(sys.argv) < 4:
-    sys.stderr.write( 'Usage: main.py c|u {input image filename} {output image filename}\n' )
+    sys.stderr.write('Usage: main.py c|u {input image filename} {output image filename}\n')
     sys.exit(1)
 
 # Get input file
- 
+
 if sys.argv[2] == '-':
     inputFile = sys.stdin
 else:
     try:
-        inputFile = open( sys.argv[2], 'rb' )
+        inputFile = open(sys.argv[2], 'rb')
     except:
-        sys.stderr.write( "Could not open input file '%s'.\n" % sys.argv[2] )
+        sys.stderr.write("Could not open input file '%s'.\n" % sys.argv[2])
         sys.exit(1)
 
 # Get output file
@@ -171,17 +218,17 @@ if sys.argv[3] == '-':
     outputFile = sys.stdout
 else:
     try:
-        outputFile = open( sys.argv[3], 'wb' )
+        outputFile = open(sys.argv[3], 'wb')
     except:
-        sys.stderr.write( "Could not open output file '%s'.\n" % sys.argv[3] )
+        sys.stderr.write("Could not open output file '%s'.\n" % sys.argv[3])
         sys.exit(1)
 
 # Run the algorithm
 
 if sys.argv[1] == 'c':
-    compress( inputFile, outputFile )
+    compress(inputFile, outputFile)
 elif sys.argv[1] == 'u':
-    uncompress( inputFile, outputFile )
+    uncompress(inputFile, outputFile)
 else:
-    sys.stderr.write( 'Usage: main.py c|u {input image filename} {output image filename}\n' )
+    sys.stderr.write('Usage: main.py c|u {input image filename} {output image filename}\n')
     sys.exit(1)
