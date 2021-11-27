@@ -70,19 +70,19 @@ def compress(inputFile, outputFile):
 
     outputBytes = bytearray()
 
-    diff_arr = []
+    diff = []
 
     # single channel image
     if len(img.shape) == 2:
         for y in range(img.shape[0]):
             for x in range(img.shape[1]):
-                # predictive encoding
+                # predictive encoding by taking difference of previous pixels
                 if y == 0:
                     val = img[y, x]
                 else:
-                    val = img[y, x] - img[y - 1, x]
+                    val = int(img[y, x]) - int(img[y - 1, x])
                 val = str(val)
-                diff_arr.append(val)
+                diff.append(val)
 
     # multi-channel image
     else:
@@ -93,17 +93,17 @@ def compress(inputFile, outputFile):
                     if y == 0:
                         val = img[y, x, c]
                     else:
-                        val = img[y, x, c] - img[y - 1, x, c]
+                        val = int(img[y, x, c]) - int(img[y - 1, x, c])
                     val = str(val)
-                    diff_arr.append(val)
+                    diff.append(val)
 
     # first pixel exists in dictionary
-    s += diff_arr[0]
-    for i in range(1, len(diff_arr)):
+    s += diff[0]
+    for i in range(1, len(diff)):
         # LZW compression
         # LZW_dict keys - subsequence, string
         # LZW_dict values - index, int
-        tmp_s = s + "," + diff_arr[i]
+        tmp_s = s + "|" + diff[i]
         if tmp_s in d:
             s = tmp_s
         else:
@@ -115,7 +115,7 @@ def compress(inputFile, outputFile):
             if count <= 0xFFFE:
                 d[tmp_s] = count
                 count += 1
-            s = diff_arr[i]
+            s = diff[i]
     # output last byte
     val_b = struct.pack(">H", d[s])
     # append bytes to output array
@@ -130,12 +130,19 @@ def compress(inputFile, outputFile):
     # reconstructed.
 
     outputFile.write(('%s\n' % headerText).encode())
-    outputFile.write(('%d %d %d\n' % (img.shape[0], img.shape[1], img.shape[2])).encode())
+    if len(img.shape) == 2:
+        outputFile.write(('%d %d\n' % (img.shape[0], img.shape[1])).encode())
+    else:
+        outputFile.write(('%d %d %d\n' % (img.shape[0], img.shape[1], img.shape[2])).encode())
+
     outputFile.write(outputBytes)
 
     # Print information about the compression
 
-    inSize = img.shape[0] * img.shape[1] * img.shape[2]
+    if len(img.shape) == 2:
+        inSize = img.shape[0] * img.shape[1]
+    else:
+        inSize = img.shape[0] * img.shape[1] * img.shape[2]
     outSize = len(outputBytes)
 
     sys.stderr.write('Input size:         %d bytes\n' % inSize)
@@ -154,8 +161,13 @@ def uncompress(inputFile, outputFile):
         sys.exit(1)
 
     # Read the rows, columns, and channels.    
-
-    rows, columns, numChannels = [int(x) for x in inputFile.readline().decode().split()]
+    try:
+        RowColChan = [int(x) for x in inputFile.readline().decode().split()]
+        rows = RowColChan[0]
+        columns = RowColChan[1]
+        numChannels = RowColChan[2]
+    except:
+        numChannels = 1  # if it's only a single channel image
 
     # Read the raw bytes.
 
@@ -171,15 +183,74 @@ def uncompress(inputFile, outputFile):
     # the unsigned integer in indices i and i+1.
 
     startTime = time.time()
-
     img = np.empty([rows, columns, numChannels], dtype=np.uint8)
 
-    i = 0
+    # convert byte values back to decimal
+    byteIter = []
+    for i in range(0, len(inputBytes), 2):
+        val = struct.unpack(">H", inputBytes[i:i + 2])[0]
+        byteIter.append(val)
+    byteIter = iter(byteIter)
+
+    img_data = np.zeros((rows * columns * numChannels))
+    # initial setup and dictionary
+    val_ls = map(str, range(-255, 256))
+    count = len(range(-255, 256))
+    LZW_dict = dict(zip(range(512), val_ls))
+
+    s = LZW_dict[next(byteIter)]
+    s_int = int(s)
+    img_data[0] = s_int
+    pos = 1
+
+    while True:
+        try:
+            # next code
+            val = next(byteIter)
+            # dictionary look up of next code
+            if val in LZW_dict:
+                t = LZW_dict[val]
+            # next code not found in dictionary
+            else:
+                # s is a string sequence of numbers
+                if '|' in s:
+                    t = s + "|" + s.split('|')[0]
+                # s is a string of a number
+                else:
+                    t = s + "|" + s
+
+            # t is a string sequence of numbers
+            if '|' in t:
+                t_arr = t.split('|')
+                for item in t_arr:
+                    img_data[pos] = int(item)
+                    pos += 1
+                LZW_dict[count] = s + "|" + t_arr[0]
+            # t is a string of a number
+            else:
+                t_int = int(t)
+                img_data[pos] = t_int
+                LZW_dict[count] = s + "|" + t
+                pos += 1
+
+            count += 1
+            s = t
+
+        # end of python iter is indicated by an exception
+        # so we know all codes have been processed when it is thrown
+        except:
+            break
+
+    img_iter = iter(img_data)
+
+    # convert to img array
     for y in range(rows):
         for x in range(columns):
             for c in range(numChannels):
-                img[y, x, c] = inputBytes[i]
-                i += 1
+                if y == 0:
+                    img[y, x, c] = next(img_iter)
+                else:
+                    img[y, x, c] = next(img_iter) + img[y - 1, x, c]
 
     endTime = time.time()
     sys.stderr.write('Uncompression time %.2f seconds\n' % (endTime - startTime))
