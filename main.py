@@ -160,17 +160,16 @@ def uncompress(inputFile, outputFile):
         sys.stderr.write("Input is not in the '%s' format.\n" % headerText)
         sys.exit(1)
 
-    # Read the rows, columns, and channels.    
+    # Read the rows, columns, and channels.
     try:
         RowColChan = [int(x) for x in inputFile.readline().decode().split()]
         rows = RowColChan[0]
         columns = RowColChan[1]
-        numChannels = RowColChan[2]
+        numChannels = RowColChan[2]  # exception caused here if only a single channel image
     except:
         numChannels = 1  # if it's only a single channel image
 
     # Read the raw bytes.
-
     inputBytes = bytearray(inputFile.read())
 
     # Build the image
@@ -183,7 +182,10 @@ def uncompress(inputFile, outputFile):
     # the unsigned integer in indices i and i+1.
 
     startTime = time.time()
-    img = np.empty([rows, columns, numChannels], dtype=np.uint8)
+    if numChannels == 1:
+        img = np.empty([rows, columns], dtype=np.uint8)
+    else:
+        img = np.empty([rows, columns, numChannels], dtype=np.uint8)
 
     # convert byte values back to decimal
     byteIter = []
@@ -244,13 +246,21 @@ def uncompress(inputFile, outputFile):
     img_iter = iter(img_data)
 
     # convert to img array
-    for y in range(rows):
-        for x in range(columns):
-            for c in range(numChannels):
+    if numChannels == 1:
+        for y in range(rows):
+            for x in range(columns):
                 if y == 0:
-                    img[y, x, c] = next(img_iter)
+                    img[y, x] = next(img_iter)
                 else:
-                    img[y, x, c] = next(img_iter) + img[y - 1, x, c]
+                    img[y, x] = next(img_iter) + img[y - 1, x]
+    else:
+        for y in range(rows):
+            for x in range(columns):
+                for c in range(numChannels):
+                    if y == 0:
+                        img[y, x, c] = next(img_iter)
+                    else:
+                        img[y, x, c] = next(img_iter) + img[y - 1, x, c]
 
     endTime = time.time()
     sys.stderr.write('Uncompression time %.2f seconds\n' % (endTime - startTime))
